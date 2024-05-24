@@ -1,21 +1,26 @@
 """
+Flood Prediction Factor, a Kaggle dataset
 
+Walter Reade, Ashley Chow. (2024). Regression with a
+Flood Prediction Dataset.
+Data from Kaggle.
+https://kaggle.com/competitions/playground-series-s4e5
+
+Modified from
 https://www.kaggle.com/code/aspillai/flood-prediction-regression-lightgbm-0-86931
 """
 import warnings
+import csv
+import pickle
+import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-# import seaborn as sns
 from sklearn.preprocessing import StandardScaler
-# from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-# from sklearn.metrics import mean_squared_log_error
 import lightgbm as lgb
 # from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import r2_score
 from sklearn.model_selection import KFold
-# from scipy.stats import spearmanr
 from scipy import stats
 from astroML.utils import split_samples
 from astropy.stats import median_absolute_deviation
@@ -34,10 +39,11 @@ num_cols = ['MonsoonIntensity', 'TopographyDrainage', 'RiverManagement',
             'InadequatePlanning', 'PoliticalFactors']
 
 
-def getFeats(df, mode=True):
+def getFeats(df, unique_vals, mode=True, product=True):
     """
     https://www.kaggle.com/competitions/playground-series-s4e5/discussion/499484
     https://www.kaggle.com/code/trupologhelper/ps4e5-openfe-blending-explain
+    + extra features
     """
     X = df[num_cols]
     scaler = StandardScaler()
@@ -104,7 +110,8 @@ def getFeats(df, mode=True):
     df['mad std'] = mad_std(X, 1)
     df['argmax'] = np.argmax(np.array(X), 1)
     df['argmin'] = np.argmin(np.array(X), 1)
-    # df['product'] = np.prod(X, 1)
+    if product:
+        df['product'] = np.prod(X, 1)
     for v in unique_vals:
         df['cnt_{}'.format(v)] = (df[num_cols] == v).sum(axis=1)
 
@@ -117,19 +124,45 @@ def getFeats(df, mode=True):
 def reg_predict(reg_models, X, y=None):
     ypred = []
     for i, model in enumerate(reg_models):
-        ypred.append(model.predict(X))
+        if isinstance(model, list):
+            ypred.append(predict_cv(X, model))
+        else:
+            ypred.append(model.predict(X))
         if y is not None:
             pred_r2 = r2_score(y, ypred[i])
             print('Model ', i, 'R2 score:', np.round(pred_r2, 5))
     ypred = np.array(ypred).mean(0)
-    r2_cv = r2_score(y, ypred)
-    print('Final test R2:', np.round(r2_cv, 5))
+    if y is not None:
+        r2_cv = r2_score(y, ypred)
+        print('Final test R2:', np.round(r2_cv, 5))
     return ypred
 
 
+def make_submission(id, ypred,
+                    filename='flood_submission.csv'):
+    fieldnames = ['id', 'FloodProbability']
+    time = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    fs = filename.split('.')
+    file = fs[0] + '_' + time + '.csv'
+    print('Output submission file', file)
+    with open(file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(fieldnames)
+        for i, y in zip(id, ypred):
+            writer.writerow([i, y])
+    csvfile.close()
+
+
 # Cross Validation
-def cross_val_train(X, y, X_test, y_test, df_sub,
-                    feats, params, regressor='lgb', spl=5):
+
+def predict_cv(X, reg_models):
+    ypred = []
+    for model in reg_models:
+        ypred.append(model.predict(X))
+    return np.array(ypred).mean(0)
+
+
+def cross_val_train(X, y, X_test, y_test, regressor, params, spl=5):
 
     submission_preds, test_preds = [], []
     val_preds = np.zeros((len(X)))
@@ -171,7 +204,6 @@ def cross_val_train(X, y, X_test, y_test, df_sub,
               " Val R2:", np.round(val_r2, 5),
               "Test R2:", np.round(test_r2, 5))
 
-        submission_preds.append(model.predict(df_sub[feats]))
         val_preds[valid_ind] = model.predict(X_val)
         val_scores.append(val_r2)
         print("-" * 60)
@@ -181,96 +213,128 @@ def cross_val_train(X, y, X_test, y_test, df_sub,
     test_r2_cv = r2_score(y_test, test_preds)
     print('Final test R2:', np.round(test_r2_cv, 5))
 
-    return val_scores, val_preds, test_preds, submission_preds, reg_models
+    return val_scores, val_preds, test_preds, reg_models
 
 
-df_train = pd.read_csv("train.csv")
-df_test = pd.read_csv("test.csv")
-print("Train:", len(df_train))
-# sample_sub = pd.read_csv("sample_submission.csv")
-df_train.head()
-print(df_train.info())
+def read_data():
+    df_train = pd.read_csv("train.csv")
+    df_test = pd.read_csv("test.csv")
+    print("Train:", len(df_train))
+    # sample_sub = pd.read_csv("sample_submission.csv")
+    df_train.head()
+    print(df_train.info())
 
-unique_vals = []
-for df in [df_train, df_test]:
-    for col in num_cols:
-        unique_vals += list(df[col].unique())
-unique_vals = list(set(unique_vals))
+    unique_vals = []
+    for df in [df_train, df_test]:
+        for col in num_cols:
+            unique_vals += list(df[col].unique())
+    unique_vals = list(set(unique_vals))
 
-df_train['typ'] = 0
-df_test['typ'] = 1
-df_all = pd.concat([df_train, df_test], axis=0)
-df_all = getFeats(df_all, mode=False)
-df_all.head()
-df_train = df_all[df_all['typ'] == 0]
-df_sub = df_all[df_all['typ'] == 1]
+    df_train['typ'] = 0
+    df_test['typ'] = 1
+    id_sub = df_test['id']
+    df_all = pd.concat([df_train, df_test], axis=0)
+    df_all = getFeats(df_all, unique_vals, mode=False, product=False)
+    df_all.head()
+    df_train = df_all[df_all['typ'] == 0]
+    df_sub = df_all[df_all['typ'] == 1]
 
-X = df_train.drop(['id', 'FloodProbability', 'typ'], axis=1)
-y = df_train['FloodProbability']
-feats = list(X.columns)
+    X = df_train.drop(['id', 'FloodProbability', 'typ'], axis=1)
+    y = df_train['FloodProbability']
+    feats = list(X.columns)
+    X_sub = df_sub[feats]
 
-(X_train, X_test), (y_train, y_test) =\
-            split_samples(X, y, [0.80, 0.20], random_state=2024)
+    return X, y, X_sub, id_sub, feats, df_all
 
-# LGB model
-params = {'verbosity': -1, 'n_estimators': 550, 'learning_rate': 0.02,
-          'num_leaves': 250, 'max_depth': 10, 'random_state': 0, }
-LGB = lgb.LGBMRegressor(**params)
-LGB.fit(X, y)
-max_num_features = 50
-lgb.plot_importance(LGB, importance_type="gain",
+
+def train_lbg(X_train, y_train, X_test, y_test, feature_importance=False):
+
+    # LGB model
+    lgb_params = {'verbosity': -1, 'n_estimators': 550, 'learning_rate': 0.02,
+                  'num_leaves': 250, 'max_depth': 10, 'random_state': 0, }
+
+    if feature_importance:
+        LGB = lgb.LGBMRegressor(**lgb_params)
+        LGB.fit(X, y)
+        max_num_features = 50
+        lgb.plot_importance(LGB, importance_type="gain",
                     figsize=(12, 8), max_num_features=max_num_features,
                     title="LightGBM Feature Importance (Gain)")
-plt.show()
+        plt.show()
 
-lgb_val_scores, lgb_val_preds, lgb_test_preds, \
-    lgb_submission_preds, lgb_models = cross_val_train(X_train,
-                                                       y_train,
-                                                       X_test, y_test,
-                                                       df_sub,
-                                                       feats,
-                                                       params,
-                                                       spl=5)
+    return train_models(X_train, y_train, X_test, y_test, 'lgb', lgb_params)
 
-# Evaluate the model
-mse = mean_squared_error(y_train, lgb_val_preds)
-rmse = np.sqrt(mean_squared_error(y_train, lgb_val_preds))
-r2 = r2_score(y_train, lgb_val_preds)
-#
-print(f'MSE: {mse}')
-print(f'RMSE: {rmse}')
-print(f'R2: {r2}')
 
-# Final test R2: 0.86913
-# Final test R2: 0.86914
-# Final test R2: 0.86913
-# Final test R2: 0.86913
-# Final test R2: 0.86848 if split_samples 0.90/0.10
+def train_xgb(X_train, y_train, X_test, y_test):
+    xgb_params = {'n_estimators': 500,
+                  'max_depth': 10,
+                  'learning_rate': 0.05,
+                  'eta': 0.1,  # learning rate default 0.3
+                  'early_stopping_rounds': 50,
+                  'eval_metric': 'rmse',
+                  'seed': 202,
+                  'min_child_weight': 3,
+                  'verbosity': 2,
+                  }
+    return train_models(X_train, y_train, X_test, y_test, 'xgb', xgb_params)
 
-# XGBoost model
-params = {'n_estimators': 500,
-          'max_depth': 10,
-          'learning_rate': 0.05,
-          'eta': 0.1,  # learning rate default 0.3
-          'early_stopping_rounds': 50,
-          'eval_metric': 'rmse',
-          'seed': 202,
-          'min_child_weight': 3,
-          'verbosity': 2,
-          }
-xgb_val_scores, xgb_val_preds, xgb_test_preds, xgb_submission_preds, \
-    xgb_models = \
-    cross_val_train(X_train,
-                    y_train,
-                    X_test, y_test,
-                    df_sub,
-                    feats,
-                    params,
-                    regressor='xgb',
-                    spl=5)
-# Final test R2: 0.86898
-# Final test R2: 0.86897
-# Final test R2: 0.869
-# Final test R2: 0.86897
-# Final test R2: 0.86903
-test_preds = (0.7 * lgb_test_preds + 0.3 * xgb_test_preds)
+
+def train_models(X_train, y_train, X_test, y_test,
+                 regressor, params, max_depths=[8, 9, 10], spl=5):
+
+    # Vary the max_depth to obtain different models
+    reg_models_list, reg_test_preds_list = [], []
+    for depth in max_depths:
+        params['max_depth'] = depth
+        _, _, reg_test_preds, \
+            reg_models = cross_val_train(X_train,
+                                         y_train,
+                                         X_test, y_test,
+                                         regressor,
+                                         params,
+                                         spl=spl)
+        reg_models_list.append(reg_models)
+        reg_test_preds_list.append(reg_test_preds)
+
+    reg_test_preds_array = np.array(reg_test_preds_list)
+    ypred_mean = reg_test_preds_array.mean(0)
+    print('Multiple depths - Final score')
+    print('test R2 mean:          ',
+          r2_score(y_test, ypred_mean))
+    print('test R2 median:        ',
+          r2_score(y_test, np.median(reg_test_preds_array, 0)))
+    print('test R2 harmonic mean: ',
+          r2_score(y_test, stats.hmean(reg_test_preds_array, 0)))
+    print('test R2 geometric mean:',
+          r2_score(y_test, stats.mstats.gmean(reg_test_preds_array, 0)))
+    return reg_models_list, ypred_mean
+
+
+def save_model(reg_model, filename):
+    with open(filename, 'wb') as file:
+        pickle.dump(reg_model, file)
+    file.close()
+
+
+def read_model(filename):
+    with open(filename, 'rb') as file:
+        output = pickle.load(file)
+    file.close()
+    return output
+
+
+if __name__ == '__main__':
+    X, y, X_sub, id_sub, feats, df_all = read_data()
+    (X_train, X_test), (y_train, y_test) =\
+        split_samples(X, y, [0.80, 0.20], random_state=2024)
+    # train lGBM and XGBoost models
+    lgb_models, lgb_test_preds = train_lbg(X_train, y_train, X_test, y_test)
+    xgb_models, xgb_test_preds = train_xgb(X_train, y_train, X_test, y_test)
+    test_preds = (0.7 * lgb_test_preds + 0.3 * xgb_test_preds)
+    print('Ensemble model R2 test:', r2_score(y_test, test_preds))
+    # Save the models
+    save_model(lgb_models, 'lgb_models.pickle')
+    save_model(xgb_models, 'xgb_models.pickle')
+    # Submission
+    ypred_sub = reg_predict(lgb_models, X_sub)
+    make_submission(id_sub, ypred_sub)
