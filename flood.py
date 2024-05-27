@@ -26,6 +26,7 @@ from astroML.utils import split_samples
 from astropy.stats import median_absolute_deviation
 from astropy.stats import mad_std
 from xgboost.sklearn import XGBRegressor
+from sklearn.linear_model import LinearRegression
 
 warnings.filterwarnings("ignore")
 
@@ -216,7 +217,17 @@ def cross_val_train(X, y, X_test, y_test, regressor, params, spl=5):
     return val_scores, val_preds, test_preds, reg_models
 
 
-def read_data():
+def read_data(to_pickle=False, from_pickle=False):
+
+    if from_pickle:
+        X = read_pickle('X_train.pickle')
+        y = read_pickle('y_train.pickle')
+        X_sub = read_pickle('X_sub.pickle')
+        id_sub = read_pickle('id_sub.pickle')
+        feats = read_pickle('feats.pickle')
+        df_all = read_pickle('df_all.pickle')
+        return X, y, X_sub, id_sub, feats, df_all
+
     df_train = pd.read_csv("train.csv")
     df_test = pd.read_csv("test.csv")
     print("Train:", len(df_train))
@@ -244,13 +255,22 @@ def read_data():
     feats = list(X.columns)
     X_sub = df_sub[feats]
 
+    if to_pickle:
+        save_pickle(X, 'X_train.pickle')
+        save_pickle(y, 'y_train.pickle')
+        save_pickle(X_sub, 'X_sub.pickle')
+        save_pickle(id_sub, 'id_sub.pickle')
+        save_pickle(feats, 'feats.pickle')
+        save_pickle(df_all, 'df_all.pickle')
+
     return X, y, X_sub, id_sub, feats, df_all
 
 
 def train_lbg(X_train, y_train, X_test, y_test, feature_importance=False):
 
     # LGB model
-    lgb_params = {'verbosity': -1, 'n_estimators': 550, 'learning_rate': 0.02,
+    # 'learning_rate': 0.02
+    lgb_params = {'verbosity': -1, 'n_estimators': 550, 'learning_rate': 0.015,
                   'num_leaves': 250, 'max_depth': 10, 'random_state': 0, }
 
     if feature_importance:
@@ -310,13 +330,13 @@ def train_models(X_train, y_train, X_test, y_test,
     return reg_models_list, ypred_mean
 
 
-def save_model(reg_model, filename):
+def save_pickle(data, filename):
     with open(filename, 'wb') as file:
-        pickle.dump(reg_model, file)
+        pickle.dump(data, file)
     file.close()
 
 
-def read_model(filename):
+def read_pickle(filename):
     with open(filename, 'rb') as file:
         output = pickle.load(file)
     file.close()
@@ -324,17 +344,31 @@ def read_model(filename):
 
 
 if __name__ == '__main__':
-    X, y, X_sub, id_sub, feats, df_all = read_data()
+    X, y, X_sub, id_sub, feats, df_all = read_data(from_pickle=True)
     (X_train, X_test), (y_train, y_test) =\
         split_samples(X, y, [0.80, 0.20], random_state=2024)
-    # train lGBM and XGBoost models
+    # or train lGBM and XGBoost models
     lgb_models, lgb_test_preds = train_lbg(X_train, y_train, X_test, y_test)
     xgb_models, xgb_test_preds = train_xgb(X_train, y_train, X_test, y_test)
     test_preds = (0.7 * lgb_test_preds + 0.3 * xgb_test_preds)
+    print('LGBM R2:', r2_score(y_test, lgb_test_preds))
+    print('XGB R2:', r2_score(y_test, xgb_test_preds))
     print('Ensemble model R2 test:', r2_score(y_test, test_preds))
     # Save the models
-    save_model(lgb_models, 'lgb_models.pickle')
-    save_model(xgb_models, 'xgb_models.pickle')
+    save_pickle(lgb_models, 'lgb_models.pickle')
+    save_pickle(xgb_models, 'xgb_models.pickle')
     # Submission
     ypred_sub = reg_predict(lgb_models, X_sub)
     make_submission(id_sub, ypred_sub)
+    #
+    # from existing models
+    lgb_models = read_pickle('lgb_models_0.86926.pickle')
+    xgb_models = read_pickle('xgb_models_0.86926.pickle')
+    ypred_lgb_train = reg_predict(lgb_models, X_train)
+    ypred_lgb_test = reg_predict(xgb_models, X_test)
+    save_pickle(ypred_lgb_train, 'ypred_lgb_train.pickle')
+    save_pickle(ypred_lgb_test, 'ypred_xgb_test.pickle')
+    plt.hist(y_train, alpha=0.5, label='train truth')
+    plt.hist(ypred_lgb_train, alpha=0.5, label='train prediction')
+    plt.legend()
+    plt.show()
