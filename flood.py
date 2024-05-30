@@ -89,13 +89,13 @@ def getFeats(df, unique_vals, mode=True, product=True):
     df['power mean 2'] = stats.pmean(X, 2, axis=1)
     df['power mean 3'] = stats.pmean(X, 3, axis=1)
     df['power mean 4'] = stats.pmean(X, 4, axis=1)
-    zcore = stats.zscore(X)
-    df['zscore_sum'] = zcore.sum(1)
-    df['zscore_mean'] = zcore.mean(1)
-    df['zscore_median'] = np.median(zcore, 1)
-    df['zscore_std'] = zcore.std(1)
-    zmax = zcore.max(1)
-    zmin = zcore.min(1)
+    zscore = stats.zscore(X)
+    df['zscore_sum'] = zscore.sum(1)
+    df['zscore_mean'] = zscore.mean(1)
+    df['zscore_median'] = np.median(zscore, 1)
+    df['zscore_std'] = zscore.std(1)
+    zmax = zscore.max(1)
+    zmin = zscore.min(1)
     df['zscore_max'] = zmax
     df['zscore_min'] = zmin
     df['zscore_range'] = zmax - zmin
