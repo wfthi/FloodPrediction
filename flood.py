@@ -365,7 +365,7 @@ if __name__ == '__main__':
     lgb_models = read_pickle('lgb_models_0.86926.pickle')
     xgb_models = read_pickle('xgb_models_0.86926.pickle')
     ypred_lgb_train = reg_predict(lgb_models, X_train)
-    ypred_lgb_test = reg_predict(xgb_models, X_test)
+    ypred_lgb_test = reg_predict(lgb_models, X_test)
     save_pickle(ypred_lgb_train, 'ypred_lgb_train.pickle')
     save_pickle(ypred_lgb_test, 'ypred_xgb_test.pickle')
     plt.hist(y_train, alpha=0.5, label='train truth')
