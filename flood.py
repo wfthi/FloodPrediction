@@ -275,7 +275,7 @@ def train_lbg(X_train, y_train, X_test, y_test, feature_importance=False):
 
     if feature_importance:
         LGB = lgb.LGBMRegressor(**lgb_params)
-        LGB.fit(X, y)
+        LGB.fit(X_train, y_train)
         max_num_features = 50
         lgb.plot_importance(LGB, importance_type="gain",
                     figsize=(12, 8), max_num_features=max_num_features,
